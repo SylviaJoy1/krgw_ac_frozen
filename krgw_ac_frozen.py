@@ -81,20 +81,15 @@ def kernel(gw, mo_energy, mo_coeff, orbs=None,
     nklist = len(kptlist)
     
     if gw.frozen is None:
-        frozen = np.zeros((nkpts), dtype=int)
-        print('frozen', frozen)
+        frozen = 0
     else:
         frozen = gw.frozen
-    #TODO: some simple mistake here
-#    assert all([orb < gw.nocc for nk in range(gw.nkpts) for orb in frozen[nk]])
-#    assert isinstance(frozen, (int, np.integer))
     
     nocc = gw.nocc
     nmo = gw.nmo
     
     if orbs is None:
         orbs = range(gw.nmo)
-    else:
 #        #EXAMPLE
 #        nocc0 = 5
 #        nocc = 2
@@ -103,12 +98,12 @@ def kernel(gw, mo_energy, mo_coeff, orbs=None,
 #        orbs = [3,4,5,6,7]
 #        nmo = len([3,4,5,6,7])
         #nocc before freezing
-        nocc0 = np.count_nonzero(gw.mo_occ[0] > 0)
-        frozen_nocc = nocc0 - nocc
-        orbs = [x - frozen_nocc for x in orbs]
-        if orbs[0] < 0:
-            logger.warn(gw, 'GW orbs must be larger than frozen core!')
-            raise RuntimeError
+    nocc0 = np.count_nonzero(gw.mo_occ[0] > 0)
+    frozen_nocc = nocc0 - nocc
+    orbs = [x - frozen_nocc for x in orbs]
+    if orbs[0] < 0:
+        logger.warn(gw, 'GW orbs must be larger than frozen core!')
+        raise RuntimeError
 
     # v_xc
     dm = np.array(mf.make_rdm1())
@@ -239,7 +234,6 @@ def get_sigma_diag(gw, orbs, kptlist, freqs, wts, iw_cutoff=None, max_memory=800
     mo_energy = padded_mo_energy(gw, gw._scf.mo_energy)#_mo_energy_without_core(gw, gw._scf.mo_energy)
     #    mo_coeff = np.array(gw._scf.mo_coeff)
     mo_coeff = padded_mo_coeff(gw, gw._scf.mo_coeff)#_mo_without_core(gw, gw._scf.mo_coeff)
-
     nocc = gw.nocc
     nmo = gw.nmo
     nao = gw.mol.nao_nr()
