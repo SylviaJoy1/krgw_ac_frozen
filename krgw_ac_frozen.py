@@ -33,6 +33,8 @@ Method:
 #frozen_orb_list = [x for x in range(7)]+[x for x in range(230,nmo)]
 #gw = krgw_ac.KRGWAC(kmf, frozen = frozen_orb_list)
 
+#TODO: CD, unrestricted, and molecular cases
+
 from functools import reduce
 import numpy
 import numpy as np
