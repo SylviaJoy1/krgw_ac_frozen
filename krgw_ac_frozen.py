@@ -14,13 +14,14 @@
 # limitations under the License.
 #
 # Author: Tianyu Zhu <zhutianyu1991@gmail.com>
+# Added frozen orbitals: Sylvia Bintrim
 #
 
 '''
 PBC spin-restricted G0W0-AC QP eigenvalues with k-point sampling
 This implementation has N^4 scaling, and is faster than GW-CD (N^4)
 and analytic GW (N^6) methods.
-GW-AC is recommended for valence states only, and is inaccuarate for core states.
+GW-AC is recommended for valence states only, and is inaccurate for core states.
 
 Method:
     See T. Zhu and G.K.-L. Chan, arxiv:2007.03148 (2020) for details
@@ -28,6 +29,9 @@ Method:
     then analytically continued to real frequency.
     Gaussian density fitting must be used (FFTDF and MDF are not supported).
 '''
+#freezing orbitals example:
+#frozen_orb_list = [x for x in range(7)]+[x for x in range(230,nmo)]
+#gw = krgw_ac.KRGWAC(kmf, frozen = frozen_orb_list)
 
 from functools import reduce
 import numpy
@@ -45,27 +49,6 @@ from pyscf import __config__
 
 einsum = lib.einsum
 
-#def _mo_energy_without_core(gw, mo_energy):
-#    nkpts = gw.nkpts
-#    result = np.zeros((nkpts, gw.nmo), dtype=mo_energy[0].dtype)
-#    frozen_mask = get_frozen_mask(gw)
-#    for nk in range(nkpts):
-#        result[nk] = mo_energy[nk][frozen_mask[nk]]
-#    return result
-#
-#def _mo_without_core(gw, mo):
-#    nkpts = gw.nkpts
-#    result = np.zeros((nkpts, mo[0].shape[0], gw.nmo), dtype=mo[0].dtype)
-#    frozen_mask = get_frozen_mask(gw)
-#    for nk in range(nkpts):
-#        result[nk] = mo[nk][:, frozen_mask[nk]]
-#    return result
-
-#I could assume frozen is given as a list [frozen_nocc, frozen_vir].
-#But since I am using frozen_mask from kmp2, I have to assume it is, say,
-#[0,1,2,3,10,11,12]
-#And we have to make sure to request orbs = [4,5,6,7,8,9]
-
 def kernel(gw, mo_energy, mo_coeff, orbs=None,
            kptlist=None, nw=None, verbose=logger.NOTE):
     '''GW-corrected quasiparticle orbital energies
@@ -74,36 +57,25 @@ def kernel(gw, mo_energy, mo_coeff, orbs=None,
         A list :  converged, mo_energy, mo_coeff
     '''
     mf = gw._scf
-
-    if kptlist is None:
-        kptlist = range(gw.nkpts)
-    nkpts = gw.nkpts
-    nklist = len(kptlist)
-    
     if gw.frozen is None:
         frozen = 0
     else:
         frozen = gw.frozen
-    
+
     nocc = gw.nocc
     nmo = gw.nmo
-    
     if orbs is None:
         orbs = range(gw.nmo)
-#        #EXAMPLE
-#        nocc0 = 5
-#        nocc = 2
-#        frozen = [0,1,2,8,9,10]
-#        #we must set orbs correctly when using the code
-#        orbs = [3,4,5,6,7]
-#        nmo = len([3,4,5,6,7])
-        #nocc before freezing
-    nocc0 = np.count_nonzero(gw.mo_occ[0] > 0)
-    frozen_nocc = nocc0 - nocc
-    orbs = [x - frozen_nocc for x in orbs]
-    if orbs[0] < 0:
-        logger.warn(gw, 'GW orbs must be larger than frozen core!')
-        raise RuntimeError
+        nocc0 = np.count_nonzero(gw.mo_occ[0] > 0)
+        frozen_nocc = nocc0 - nocc
+        orbs = [x - frozen_nocc for x in orbs]
+        if orbs[0] < 0:
+            logger.warn(gw, 'GW orbs must be larger than frozen core!')
+            raise RuntimeError
+    if kptlist is None:
+        kptlist = range(gw.nkpts)
+    nkpts = gw.nkpts
+    nklist = len(kptlist)
 
     # v_xc
     dm = np.array(mf.make_rdm1())
@@ -224,16 +196,13 @@ def get_rho_response(gw, omega, mo_energy, Lpq, kL, kidx):
         Pi += 4./nkpts * einsum('Pia,Qia->PQ',Pia,Lpq[i][:,:nocc,nocc:].conj())
     return Pi
 
-#TODO: check nao/nmo vs original code
 def get_sigma_diag(gw, orbs, kptlist, freqs, wts, iw_cutoff=None, max_memory=8000):
     '''
     Compute GW correlation self-energy (diagonal elements)
     in MO basis on imaginary axis
     '''
-    #mo_energy = np.array(gw._scf.mo_energy)
-    mo_energy = padded_mo_energy(gw, gw._scf.mo_energy)#_mo_energy_without_core(gw, gw._scf.mo_energy)
-    #    mo_coeff = np.array(gw._scf.mo_coeff)
-    mo_coeff = padded_mo_coeff(gw, gw._scf.mo_coeff)#_mo_without_core(gw, gw._scf.mo_coeff)
+    mo_energy = padded_mo_energy(gw, gw._scf.mo_energy)
+    mo_coeff = padded_mo_coeff(gw, gw._scf.mo_coeff)
     nocc = gw.nocc
     nmo = gw.nmo
     nao = gw.mol.nao_nr()
@@ -320,7 +289,7 @@ def get_sigma_diag(gw, orbs, kptlist, freqs, wts, iw_cutoff=None, max_memory=800
                     for LpqR, LpqI, sign \
                             in mydf.sr_loop([kpti, kptj], max_memory=0.1*gw._scf.max_memory, compact=False):
                         Lpq.append(LpqR+LpqI*1.0j)
-                    # support uneqaul naux on different k points
+                    # support unequal naux on different k points
                     Lpq = np.vstack(Lpq).reshape(-1,nao**2)
                     tao = []
                     ao_loc = None
@@ -432,7 +401,7 @@ def get_rho_response_wing(gw, omega, mo_energy, Lpq, qij):
 def get_qij(gw, q, mo_coeff, uniform_grids=False):
     '''
     Compute qij = 1/Omega * |< psi_{ik} | e^{iqr} | psi_{ak-q} >|^2 at q: (nkpts, nocc, nvir)
-    through kp perturbtation theory
+    through kp perturbation theory
     Ref: Phys. Rev. B 83, 245122 (2011)
     '''
     nocc = gw.nocc
@@ -441,7 +410,7 @@ def get_qij(gw, q, mo_coeff, uniform_grids=False):
     kpts = gw.kpts
     nkpts = len(kpts)
     cell = gw.mol
-    mo_energy = padded_mo_energy(gw, gw._scf.mo_energy)#_mo_energy_without_core(gw, gw._scf.mo_energy)
+    mo_energy = padded_mo_energy(gw, gw._scf.mo_energy)
 
     if uniform_grids:
         mydf = df.FFTDF(cell, kpts=kpts)
@@ -485,7 +454,7 @@ def _get_scaled_legendre_roots(nw):
 
 def _get_clenshaw_curtis_roots(nw):
     """
-    Clenshaw-Curtis qaudrature on [0,inf)
+    Clenshaw-Curtis quadrature on [0,inf)
     Ref: J. Chem. Phys. 132, 234114 (2010)
     Returns:
         freqs : 1D ndarray
@@ -596,8 +565,9 @@ class KRGWAC(lib.StreamObject):
         self.stdout = self.mol.stdout
         self.max_memory = mf.max_memory
 
-        #        if frozen is not None and frozen > 0:
-        #            raise NotImplementedError
+        #TODO: implement frozen orbs
+#        if frozen is not None and frozen > 0:
+#            raise NotImplementedError
         self.frozen = frozen
 
         # DF-KGW must use GDF integrals
@@ -661,14 +631,10 @@ class KRGWAC(lib.StreamObject):
         Output:
             mo_energy: GW quasiparticle energy
         """
-        #        if mo_coeff is None:
-        #            mo_coeff = np.array(self._scf.mo_coeff)
-        #        if mo_energy is None:
-        #            mo_energy = np.array(self._scf.mo_energy)
         if mo_coeff is None:
-            mo_coeff = padded_mo_coeff(self, self._scf.mo_coeff)#_mo_without_core(self, self._scf.mo_coeff)
+            mo_coeff = padded_mo_coeff(self, self._scf.mo_coeff)
         if mo_energy is None:
-            mo_energy = padded_mo_energy(self, self._scf.mo_energy)#_mo_energy_without_core(self, self._scf.mo_energy)
+            mo_energy = padded_mo_energy(self, self._scf.mo_energy)
 
         nmo = self.nmo
         naux = self.with_df.get_naoaux()
@@ -676,7 +642,6 @@ class KRGWAC(lib.StreamObject):
         mem_incore = (2*nkpts*nmo**2*naux) * 16/1e6
         mem_now = lib.current_memory()[0]
         if (mem_incore + mem_now > 0.99*self.max_memory):
-            print(mem_incore, mem_now, self.max_memory)
             logger.warn(self, 'Memory may not be enough!')
             raise NotImplementedError
 
